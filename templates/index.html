@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Daily Digest</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; color: #333; }
+header { background: #1a1a1a; color: white; padding: 20px 32px; display: flex; align-items: center; justify-content: space-between; }
+header h1 { font-size: 22px; font-weight: 600; }
+header span { font-size: 13px; opacity: 0.6; }
+.container { max-width: 900px; margin: 32px auto; padding: 0 16px; }
+.card { background: white; border-radius: 10px; padding: 24px; margin-bottom: 20px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+.feeds-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
+.feed-item { background: #f9f9f9; border: 1px solid #eee; border-radius: 6px; padding: 10px 14px; display: flex; justify-content: space-between; align-items: center; font-size: 14px; }
+.feed-item .cat { font-size: 11px; color: #888; }
+.feed-item button { background: none; border: none; color: #cc3333; cursor: pointer; font-size: 16px; }
+.add-feed { display: flex; gap: 8px; margin-top: 12px; }
+.add-feed input { flex: 1; padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; }
+.add-feed select { padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; }
+button.primary { background: #1a1a1a; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; }
+button.primary:hover { background: #333; }
+button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
+.articles-list { margin-top: 12px; }
+.article-item { padding: 14px 0; border-bottom: 1px solid #f0f0f0; display: flex; gap: 12px; align-items: flex-start; }
+.article-item:last-child { border-bottom: none; }
+.article-check { margin-top: 2px; }
+.article-info { flex: 1; }
+.article-title { font-size: 14px; font-weight: 500; margin-bottom: 4px; }
+.article-meta { font-size: 12px; color: #888; margin-bottom: 4px; }
+.article-summary { font-size: 13px; color: #555; line-height: 1.5; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 10px; background: #eee; font-size: 11px; color: #555; margin-right: 6px; }
+.status { padding: 12px; background: #f0f0f0; border-radius: 6px; font-size: 14px; margin-top: 12px; }
+.status.loading { background: #e8f0fe; color: #1a56db; }
+.status.success { background: #e8f9e8; color: #1e7e34; }
+.status.error { background: #fde8e8; color: #cc0000; }
+h2 { font-size: 16px; font-weight: 600; margin-bottom: 4px; }
+.subtitle { font-size: 13px; color: #888; }
+.actions { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+<header>
+  <h1>📰 Daily Digest</h1>
+  <span id="today"></span>
+</header>
+<div class="container">
+  <!-- Feeds -->
+  <div class="card">
+    <h2>RSS Feeds</h2>
+    <p class="subtitle">Sources for your daily digest</p>
+    <div class="feeds-grid" id="feeds-list"></div>
+    <div class="add-feed">
+      <input id="new-url" placeholder="RSS feed URL..." />
+      <input id="new-name" placeholder="Name" style="max-width:140px" />
+      <select id="new-cat">
+        <option>Tech</option><option>Productivity</option><option>Gear</option>
+        <option>Health</option><option>Finance</option><option>Other</option>
+      </select>
+      <button class="primary" onclick="addFeed()">Add</button>
+    </div>
+  </div>
+
+  <!-- Actions -->
+  <div class="card">
+    <h2>Generate Digest</h2>
+    <p class="subtitle">Fetch articles and generate your PDF</p>
+    <div class="actions">
+      <button class="primary" id="fetch-btn" onclick="fetchArticles()">🔄 Fetch Articles</button>
+      <button class="primary" id="gen-btn" onclick="generatePDF()" disabled>📄 Generate PDF</button>
+    </div>
+    <div id="status" style="display:none" class="status"></div>
+  </div>
+
+  <!-- Articles -->
+  <div class="card" id="articles-card" style="display:none">
+    <h2>Articles <span id="article-count" style="font-weight:400;color:#888"></span></h2>
+    <p class="subtitle">Uncheck articles to exclude from PDF</p>
+    <div class="articles-list" id="articles-list"></div>
+  </div>
+</div>
+
+<script>
+const DEFAULT_FEEDS = [
+  {name:"Hacker News", url:"https://news.ycombinator.com/rss", category:"Tech"},
+  {name:"Cal Newport", url:"https://calnewport.com/feed/", category:"Productivity"},
+  {name:"Gear Patrol", url:"https://www.gearpatrol.com/feed/", category:"Gear"},
+  {name:"Wired", url:"https://www.wired.com/feed/rss", category:"Tech"},
+  {name:"Ars Technica", url:"https://feeds.arstechnica.com/arstechnica/index", category:"Tech"},
+];
+let feeds = JSON.parse(localStorage.getItem('feeds') || 'null') || DEFAULT_FEEDS;
+let articles = [];
+
+document.getElementById('today').textContent = new Date().toLocaleDateString('en-US', {weekday:'long', year:'numeric', month:'long', day:'numeric'});
+
+function saveFeeds() { localStorage.setItem('feeds', JSON.stringify(feeds)); }
+
+function renderFeeds() {
+  document.getElementById('feeds-list').innerHTML = feeds.map((f,i) =>
+    `<div class="feed-item">
+      <div><div>${f.name}</div><div class="cat">${f.category}</div></div>
+      <button onclick="removeFeed(${i})">×</button>
+    </div>`
+  ).join('');
+}
+
+function addFeed() {
+  const url = document.getElementById('new-url').value.trim();
+  const name = document.getElementById('new-name').value.trim();
+  const cat = document.getElementById('new-cat').value;
+  if (!url) return;
+  feeds.push({name: name || url, url, category: cat});
+  saveFeeds(); renderFeeds();
+  document.getElementById('new-url').value = '';
+  document.getElementById('new-name').value = '';
+}
+
+function removeFeed(i) { feeds.splice(i, 1); saveFeeds(); renderFeeds(); }
+
+function setStatus(msg, type='loading') {
+  const el = document.getElementById('status');
+  el.style.display = 'block';
+  el.className = 'status ' + type;
+  el.textContent = msg;
+}
+
+async function fetchArticles() {
+  const btn = document.getElementById('fetch-btn');
+  btn.disabled = true;
+  setStatus('Fetching articles from ' + feeds.length + ' sources...', 'loading');
+  try {
+    const res = await fetch('/api/fetch', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({feeds})});
+    articles = await res.json();
+    renderArticles();
+    setStatus('Fetched ' + articles.length + ' articles. Select what to include, then generate PDF.', 'success');
+    document.getElementById('gen-btn').disabled = false;
+  } catch(e) {
+    setStatus('Error fetching articles: ' + e.message, 'error');
+  }
+  btn.disabled = false;
+}
+
+function renderArticles() {
+  const list = document.getElementById('articles-list');
+  document.getElementById('articles-card').style.display = 'block';
+  document.getElementById('article-count').textContent = '(' + articles.length + ')';
+  list.innerHTML = articles.map((a,i) => `
+    <div class="article-item">
+      <input type="checkbox" class="article-check" id="a${i}" checked>
+      <div class="article-info">
+        <div class="article-title"><label for="a${i}">${a.title}</label></div>
+        <div class="article-meta"><span class="badge">${a.category}</span>${a.source}</div>
+        ${a.summary ? `<div class="article-summary">${a.summary.slice(0,200)}${a.summary.length>200?'...':''}</div>` : ''}
+      </div>
+    </div>
+  `).join('');
+}
+
+async function generatePDF() {
+  const selected = articles.filter((_,i) => document.getElementById('a'+i)?.checked);
+  if (!selected.length) { setStatus('Select at least one article.', 'error'); return; }
+  const btn = document.getElementById('gen-btn');
+  btn.disabled = true;
+  setStatus('Generating PDF with ' + selected.length + ' articles...', 'loading');
+  try {
+    const res = await fetch('/api/generate', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({articles: selected, title: 'Daily Digest'})});
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'digest-' + new Date().toISOString().slice(0,10) + '.pdf';
+    a.click();
+    setStatus('PDF downloaded! Transfer to your Kindle Scribe.', 'success');
+  } catch(e) {
+    setStatus('Error generating PDF: ' + e.message, 'error');
+  }
+  btn.disabled = false;
+}
+
+renderFeeds();
+</script>
+</body>
+</html>
